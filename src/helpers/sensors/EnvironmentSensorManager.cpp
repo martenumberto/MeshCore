@@ -38,9 +38,6 @@ static uint32_t bsec_last_save_ms    = 0;
 #endif
 
 #ifdef ENV_INCLUDE_BME680
-#ifndef TELEM_BME680_ADDRESS
-#define TELEM_BME680_ADDRESS 0x76
-#endif
 #define TELEM_BME680_SEALEVELPRESSURE_HPA (1013.25)
 #include <Adafruit_BME680.h>
 static Adafruit_BME680 BME680(TELEM_WIRE);
@@ -556,7 +553,8 @@ static const SensorDef SENSOR_TABLE[] = {
   { TELEM_AHTX_ADDRESS,    "AHT10/AHT20", init_ahtx0,    query_ahtx0    },
 #endif
 #ifdef ENV_INCLUDE_BME680
-  { TELEM_BME680_ADDRESS,  "BME680",       init_bme680,   query_bme680   },
+  { 0x76,  "BME680 (0x76)",        init_bme680,   query_bme680   },
+  { 0x77,  "BME680 (0x77)",        init_bme680,   query_bme680   },
 #endif
 #if ENV_INCLUDE_BME680_BSEC
   { TELEM_BME680_ADDRESS,  "BME680+BSEC",   init_bme680_bsec, query_bme680_bsec },
