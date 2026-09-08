@@ -99,6 +99,7 @@ LPS22HBClass LPS22HB(*TELEM_WIRE);
 #if ENV_INCLUDE_INA3221
 #ifndef TELEM_INA3221_ADDRESS
 #define TELEM_INA3221_ADDRESS     0x42    // INA3221 3 channel current sensor I2C address
+#define TELEM_INA3221_ID          0x322
 #endif
 #ifndef TELEM_INA3221_SHUNT_VALUE
 #define TELEM_INA3221_SHUNT_VALUE 0.100 // most variants will have a 0.1 ohm shunts
@@ -121,6 +122,7 @@ static Adafruit_INA219 INA219(TELEM_INA219_ADDRESS);
 #if ENV_INCLUDE_INA260
 #ifndef TELEM_INA260_ADDRESS
 #define TELEM_INA260_ADDRESS    0x41      // INA260 single channel current sensor I2C address
+#define TELEM_INA260_ID         0x227
 #endif
 #include <Adafruit_INA260.h>
 static Adafruit_INA260 INA260;
@@ -129,6 +131,7 @@ static Adafruit_INA260 INA260;
 #if ENV_INCLUDE_INA226
 #ifndef TELEM_INA226_ADDRESS
 #define TELEM_INA226_ADDRESS     0x44
+#define TELEM_INA226_ID          0x226
 #endif
 #define TELEM_INA226_SHUNT_VALUE 0.100
 #define TELEM_INA226_MAX_AMP     0.8
@@ -222,6 +225,28 @@ static void scanI2CBus(TwoWire* wire, bool found[128]) {
     wire->beginTransmission(addr);
     found[addr] = (wire->endTransmission() == 0);
   }
+}
+
+// ------------------------------------------------------------
+// I2C-Helper: reads 16-bit register. Returns false if the bus transfer fails.
+// ------------------------------------------------------------
+static bool read_ina_reg16(TwoWire* wire, uint8_t addr, uint8_t reg, uint16_t& out) {
+  wire->beginTransmission(addr);
+  wire->write(reg);
+  if (wire->endTransmission(false) != 0) return false;
+  if (wire->requestFrom(addr, (uint8_t)2) != 2) return false;
+  out = (uint16_t(wire->read()) << 8) | wire->read();
+  return true;
+}
+
+// Reads Manufacturer-ID (0xFE) & Type-ID (0xFF)
+// Returns the Type-ID shifted down by 4 bits (0x226 / 0x227 / 0x322 ...)
+// Returns 0 if the device is not an INA chip or has no such reg (INA219)
+static uint16_t identify_ina_chip(TwoWire* wire, uint8_t addr) {
+  uint16_t mfr_id = 0, id = 0;
+  if (!read_ina_reg16(wire, addr, 0xFE, mfr_id) || mfr_id != 0x5449) return 0;
+  if (!read_ina_reg16(wire, addr, 0xFF, id)) return 0;
+  return id >> 4;  // 0x226 / 0x227 / 0x322 ...
 }
 
 // ============================================================
@@ -344,7 +369,12 @@ static void query_lps22hb(uint8_t ch, uint8_t, CayenneLPP& lpp) {
 
 #if ENV_INCLUDE_INA3221
 static uint8_t init_ina3221(TwoWire* wire, uint8_t addr) {
-  if (!INA3221.begin(addr, wire)) return 0;
+  if (identify_ina_chip(wire, addr) != TELEM_INA3221_ID) {
+    return 0;
+  }
+
+  return INA3221.begin(addr, wire) ? 1 : 0;
+
   for (int i = 0; i < TELEM_INA3221_NUM_CHANNELS; i++) {
     INA3221.setShuntResistance(i, TELEM_INA3221_SHUNT_VALUE);
   }
@@ -375,8 +405,11 @@ static void query_ina3221(uint8_t ch, uint8_t sub_ch, CayenneLPP& lpp) {
 #endif
 
 #if ENV_INCLUDE_INA219
-static uint8_t init_ina219(TwoWire* wire, uint8_t) {
-  // INA219 static instance was constructed with the address; begin() uses it.
+static uint8_t init_ina219(TwoWire* wire, uint8_t addr) {
+  if (identify_ina_chip(wire, addr) != 0) {
+    MESH_DEBUG_PRINTLN("Address %02X is a different INA chip, not INA219 - skipping", addr);
+    return 0;
+  }
   return INA219.begin(wire) ? 1 : 0;
 }
 static void query_ina219(uint8_t ch, uint8_t, CayenneLPP& lpp) {
@@ -388,6 +421,9 @@ static void query_ina219(uint8_t ch, uint8_t, CayenneLPP& lpp) {
 
 #if ENV_INCLUDE_INA260
 static uint8_t init_ina260(TwoWire* wire, uint8_t addr) {
+  if (identify_ina_chip(wire, addr) != TELEM_INA260_ID) {
+    return 0;
+  }
   return INA260.begin(addr, wire) ? 1 : 0;
 }
 static void query_ina260(uint8_t ch, uint8_t, CayenneLPP& lpp) {
@@ -398,8 +434,10 @@ static void query_ina260(uint8_t ch, uint8_t, CayenneLPP& lpp) {
 #endif
 
 #if ENV_INCLUDE_INA226
-static uint8_t init_ina226(TwoWire*, uint8_t) {
-  // INA226 static instance was constructed with address and wire.
+static uint8_t init_ina226(TwoWire* wire, uint8_t addr) {
+  if (identify_ina_chip(wire, addr) != TELEM_INA226_ID) {
+    return 0;
+  }
   if (!INA226.begin()) return 0;
   INA226.setMaxCurrentShunt(TELEM_INA226_MAX_AMP, TELEM_INA226_SHUNT_VALUE);
   return 1;
